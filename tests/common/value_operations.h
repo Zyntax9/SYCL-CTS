@@ -21,9 +21,19 @@ namespace value_operations {
 template <typename T, size_t N>
 using ArrayT = T[N];
 
-// Modify functions
+template <typename T>
+struct IsArrayT : std::false_type {};
 template <typename T, size_t N>
-inline void assign(ArrayT<T, N>& left, const T& right) {
+struct IsArrayT<ArrayT<T, N>> : std::true_type {};
+
+template <typename T> struct IsNonArrayWithSubscriptOperator {
+  static constexpr bool value =
+      !IsArrayT<T>::value && has_subscript_operator_v<T>;
+};
+
+// Modify functions
+template <typename T, size_t N, typename RightNonArrT = T>
+inline void assign(ArrayT<T, N>& left, const RightNonArrT& right) {
   for (size_t i = 0; i < N; ++i) {
     left[i] = right;
   }
@@ -40,8 +50,9 @@ inline void assign(ArrayT<LeftArrT, LeftArrN>& left,
 }
 
 template <typename LeftArrT, typename RightNonArrT>
-inline typename std::enable_if_t<has_subscript_operator_v<LeftArrT> &&
-                                 !has_subscript_operator_v<RightNonArrT>>
+inline typename std::enable_if_t<
+    IsNonArrayWithSubscriptOperator<LeftArrT>::value &&
+    !has_subscript_operator_v<RightNonArrT>>
 assign(LeftArrT& left, const RightNonArrT& right) {
   for (size_t i = 0; i < left.size(); ++i) {
     left[i] = right;
@@ -49,8 +60,9 @@ assign(LeftArrT& left, const RightNonArrT& right) {
 }
 
 template <typename LeftArrT, typename RightArrT>
-inline typename std::enable_if_t<has_subscript_operator_v<LeftArrT> &&
-                                 has_subscript_operator_v<RightArrT>>
+inline typename std::enable_if_t<
+    IsNonArrayWithSubscriptOperator<LeftArrT>::value &&
+    IsNonArrayWithSubscriptOperator<RightArrT>::value>
 assign(LeftArrT& left, const RightArrT& right) {
   assert((left.size() == right.size()) && "Arrays have to be the same size");
   for (size_t i = 0; i < left.size(); ++i) {
@@ -64,6 +76,17 @@ inline typename std::enable_if_t<!has_subscript_operator_v<LeftNonArrT> &&
 assign(LeftNonArrT& left, const RightNonArrT& right) {
   left = right;
 }
+
+#if defined(SYCL_EXT_ONEAPI_PROPERTIES) && \
+    defined(SYCL_EXT_ONEAPI_DEVICE_GLOBAL)
+
+template <typename T, typename Props, typename RightNonArrT>
+void assign(sycl::ext::oneapi::experimental::device_global<T, Props>& left,
+            const RightNonArrT& right) {
+  assign(left.get(), right);
+}
+
+#endif
 /////////////////////////// Modify functions
 
 // Compare functions
@@ -87,9 +110,10 @@ inline bool are_equal(const ArrayT<LeftArrT, LeftArrN>& left,
 }
 
 template <typename LeftArrT, typename RightNonArrT>
-inline typename std::enable_if_t<has_subscript_operator_v<LeftArrT> &&
-                                     !has_subscript_operator_v<RightNonArrT>,
-                                 bool>
+inline typename std::enable_if_t<
+    IsNonArrayWithSubscriptOperator<LeftArrT>::value &&
+        !has_subscript_operator_v<RightNonArrT>,
+    bool>
 are_equal(const LeftArrT& left, const RightNonArrT& right) {
   for (size_t i = 0; i < left.size(); ++i) {
     if (left[i] != right) return false;
@@ -98,9 +122,10 @@ are_equal(const LeftArrT& left, const RightNonArrT& right) {
 }
 
 template <typename LeftArrT, typename RightArrT>
-inline typename std::enable_if_t<has_subscript_operator_v<LeftArrT> &&
-                                     has_subscript_operator_v<RightArrT>,
-                                 bool>
+inline typename std::enable_if_t<
+    IsNonArrayWithSubscriptOperator<LeftArrT>::value &&
+        IsNonArrayWithSubscriptOperator<RightArrT>::value,
+    bool>
 are_equal(const LeftArrT& left, const RightArrT& right) {
   assert((left.size() == right.size()) && "Arrays have to be the same size");
   for (size_t i = 0; i < left.size(); ++i) {
@@ -116,6 +141,26 @@ inline typename std::enable_if_t<!has_subscript_operator_v<LeftNonArrT> &&
 are_equal(const LeftNonArrT& left, const RightNonArrT& right) {
   return (left == right);
 }
+
+#if defined(SYCL_EXT_ONEAPI_PROPERTIES) && \
+    defined(SYCL_EXT_ONEAPI_DEVICE_GLOBAL)
+
+template <typename T, typename Props, typename RightT>
+bool are_equal(sycl::ext::oneapi::experimental::device_global<T, Props>& left,
+               const RightT& right) {
+  return are_equal(left.get(), right);
+}
+
+template <typename LeftT, typename LeftProps, typename RightT,
+          typename RightProps>
+bool are_equal(
+    sycl::ext::oneapi::experimental::device_global<LeftT, LeftProps>& left,
+    const sycl::ext::oneapi::experimental::device_global<RightT, RightProps>&
+        right) {
+  return are_equal(left.get(), right.get());
+}
+
+#endif
 //////////////////////////// Compare functions
 
 }  // namespace value_operations

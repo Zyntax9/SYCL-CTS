@@ -23,28 +23,18 @@
 namespace TEST_NAMESPACE {
 using namespace sycl_cts;
 using namespace device_global_common_functions;
-#if defined(SYCL_EXT_ONEAPI_PROPERTY_LIST) && \
+#if defined(SYCL_EXT_ONEAPI_PROPERTIES) && \
     defined(SYCL_EXT_ONEAPI_DEVICE_GLOBAL)
 namespace oneapi = sycl::ext::oneapi;
 
 namespace several_kernel_in_one_device {
 template <typename T>
-oneapi::device_global<T> dev_global;
-template <typename T>
-const oneapi::device_global<T> const_dev_global;
+oneapi::experimental::device_global<T> dev_global;
 
 template <typename T>
 struct first_kernel;
 template <typename T>
 struct second_kernel;
-
-// Used to address elements in the result array
-enum class indx : size_t {
-  const_expected,
-  non_const_expected,
-  size  // must be last
-};
-constexpr auto integral(const indx& i) { return to_integral<indx>(i); }
 
 /**
  * @brief The function tests that device_global value changes correctly being
@@ -53,64 +43,53 @@ constexpr auto integral(const indx& i) { return to_integral<indx>(i); }
  */
 template <typename T>
 void run_test(util::logger& log, const std::string& type_name) {
-  // Changing non-const value in first kernel
-  auto queue = util::get_cts_object::queue();
-  {
-    queue.submit([&](sycl::handler& cgh) {
-      cgh.single_task<first_kernel<T>>([=](sycl::kernel_handler h) {
-        value_operations::assign<T>(dev_global<T>, 42);
-      });
-    });
-    queue.wait_and_throw();
-  }
-
   // Using remove_extent for get type of element when T is array
   // If T is not array then element_type == T
   // As we fill the array with the same numbers with type of the array element,
   // we can store only one number to compare whole array with this number
   using element_type = std::remove_extent_t<T>;
 
-  // Creating variables for store result of comparing
-  constexpr size_t checks_size = integral(indx::size);
+  element_type new_value;
+  value_operations::assign(new_value, 42);
 
-  // For non-const expecting changed value
-  util::array<element_type, checks_size> expected_value;
+  // Changing value in first kernel
+  auto queue = util::get_cts_object::queue();
+  {
+    queue.submit([&](sycl::handler& cgh) {
+      cgh.single_task<first_kernel<T>>(
+          [=]() { value_operations::assign(dev_global<T>, new_value); });
+    });
+    queue.wait_and_throw();
+  }
 
-  // For const value expecting that value not changed,so keep default value
-  util::array<bool, checks_size> changed_correct;
-  value_operations<element_type>::assign(
-      expected_value[integral(indx::non_const_expected)]);
+  // Expecting changed value
+  element_type expected_value;
+
+  bool changed_correct;
+  value_operations::assign(expected_value, new_value);
 
   {
-    sycl::buffer<bool> changed_corr_buf(changed_correct.values,
-                                        sycl::range<1>(checks_size));
+    sycl::buffer<bool> changed_corr_buf(&changed_correct, sycl::range<1>(1));
 
     queue.submit([&](sycl::handler& cgh) {
       auto changed_corr =
           changed_corr_buf.template get_access<sycl::access_mode::write>(cgh);
       // Comparing current device_global val with expected in second kernel
-      cgh.single_task<second_kernel<T>>([=](sycl::kernel_handler h) {
-        changed_corr[integral(indx::const_expected)] =
-            value_operations::are_equal<T>(
-                const_dev_global<T>,
-                expected_value[integral(indx::const_expected)]);
-        changed_corr[integral(indx::non_const_expected)] =
-            value_operations::are_equal<T>(
-                dev_global<T>,
-                expected_value[integral(indx::non_const_expected)]);
+      cgh.single_task<second_kernel<T>>([=]() {
+        changed_corr[0] =
+            value_operations::are_equal(dev_global<T>, expected_value);
       });
     });
     queue.wait_and_throw();
   }
 
-  for (size_t i = 0; i < checks_size; i++) {
-    if (changed_correct[i] == false) {
-      FAIL(log, get_case_description(
-                    "device_global: Running two kernels on one device",
-                    "Value changed incorrectly after modify in one kernel and "
-                    "read from another",
-                    type_name));
-    }
+  if (changed_correct == false) {
+    std::string fail_msg = get_case_description(
+        "device_global: Running two kernels on one device",
+        "Value changed incorrectly after modify in one kernel and "
+        "read from another",
+        type_name);
+    FAIL(log, fail_msg);
   }
 }
 }  // namespace several_kernel_in_one_device
@@ -138,11 +117,12 @@ class TEST_NAME : public sycl_cts::util::test_base {
   /** execute the test
    */
   void run(util::logger& log) override {
-#if !defined(SYCL_EXT_ONEAPI_PROPERTY_LIST)
-    WARN("SYCL_EXT_ONEAPI_PROPERTY_LIST is not defined, test is skipped");
+#if !defined(SYCL_EXT_ONEAPI_PROPERTIES)
+    WARN("SYCL_EXT_ONEAPI_PROPERTIES is not defined, test is skipped");
 #elif !defined(SYCL_EXT_ONEAPI_DEVICE_GLOBAL)
     WARN("SYCL_EXT_ONEAPI_DEVICE_GLOBAL is not defined, test is skipped");
 #else
+    auto types = device_global_types::get_types();
     for_all_types<check_device_global_serveal_kernels_one_device_for_type>(
         types, log);
 #endif

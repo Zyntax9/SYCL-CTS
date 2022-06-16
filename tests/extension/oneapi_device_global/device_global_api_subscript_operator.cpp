@@ -23,26 +23,22 @@ namespace TEST_NAMESPACE {
 using namespace sycl_cts;
 using namespace device_global_common_functions;
 
-#if defined(SYCL_EXT_ONEAPI_PROPERTY_LIST) && \
+#if defined(SYCL_EXT_ONEAPI_PROPERTIES) && \
     defined(SYCL_EXT_ONEAPI_DEVICE_GLOBAL)
-using namespace sycl::ext::oneapi;
+using namespace sycl::ext::oneapi::experimental;
 
-template <typename T, test_names name>
+template <typename T, size_t sizeOfArray, test_names name>
 struct device_global_kernel_name;
 
 namespace subscript_operator {
 // Creating instance with default constructor
 template <typename T, size_t sizeOfArray>
 device_global<T[sizeOfArray]> dev_global;
-template <typename T, size_t sizeOfArray>
-const device_global<T[sizeOfArray]> const_dev_global;
 
 // Used to address elements in the result array
 enum class indx : size_t {
-  correct_def_val_const,
-  correct_def_val_non_const,
-  same_type_const,
-  same_type_non_const,
+  correct_def_val,
+  same_type,
   correct_changed_val,
   size  // must be last
 };
@@ -55,14 +51,12 @@ constexpr size_t integral(const indx& i) { return to_integral(i); }
  */
 template <typename T, size_t sizeOfArray>
 void run_test(util::logger& log, const std::string& type_name) {
-  using kernel = device_global_kernel_name<T, test_names::subscript_operator>;
+  using kernel =
+      device_global_kernel_name<T, sizeOfArray, test_names::subscript_operator>;
 
   std::string error_strings[integral(indx::size)]{
-      "Wrong default value returned by subscript operator of const instance",
-      "Wrong default value returned by subscript operator of non-const "
-      "instance",
-      "Wrong type returned by subscript operator of const instance",
-      "Wrong type returned by subscript operator of non-const instance",
+      "Wrong default value returned by subscript operator of instance",
+      "Wrong type returned by subscript operator of instance",
       "Wrong value after change instance through subscript operator",
   };
 
@@ -80,16 +74,11 @@ void run_test(util::logger& log, const std::string& type_name) {
         T value_default{};
         for (size_t i = 0; i < sizeOfArray; ++i) {
           // Check that array element contains default value
-          result_acc[integral(indx::correct_def_val_const)] =
-              const_dev_global<T, sizeOfArray>[i] == value_default;
-          result_acc[integral(indx::correct_def_val_non_const)] =
+          result_acc[integral(indx::correct_def_val)] =
               dev_global<T, sizeOfArray>[i] == value_default;
 
           // Check that array element contains correct type
-          result_acc[integral(indx::same_type_const)] =
-              std::is_same<decltype(const_dev_global<T, sizeOfArray>[i]),
-                           typename device_global<T>::element_type&>::value;
-          result_acc[integral(indx::same_type_non_const)] =
+          result_acc[integral(indx::same_type)] =
               std::is_same<decltype(dev_global<T, sizeOfArray>[i]),
                            typename device_global<T>::element_type&>::value;
 
@@ -102,21 +91,20 @@ void run_test(util::logger& log, const std::string& type_name) {
           // If any check fail, then sum will not be equal to size, then
           // we can break the loop, because test is failed
           const int sum_of_checks =
-              result_acc[integral(indx::correct_def_val_const)] +
-              result_acc[integral(indx::correct_def_val_non_const)] +
-              result_acc[integral(indx::same_type_const)] +
-              result_acc[integral(indx::same_type_non_const)] +
+              result_acc[integral(indx::correct_def_val)] +
+              result_acc[integral(indx::same_type)] +
               result_acc[integral(indx::correct_changed_val)];
           if (sum_of_checks != integral(indx::size)) break;
         }
       });
     });
   }
-  for (size_t i = integral(indx::correct_def_val_const);
-       i < integral(indx::size); ++i) {
+  for (size_t i = integral(indx::correct_def_val); i < integral(indx::size);
+       ++i) {
     if (!result[i]) {
-      FAIL(log, (get_case_description<T>("Device global: operator[]()",
-                                         error_strings[i], type_name)));
+      std::string fail_msg = get_case_description("Device global: operator[]()",
+                                                  error_strings[i], type_name);
+      FAIL(log, fail_msg);
     }
   }
 }
@@ -146,8 +134,8 @@ class TEST_NAME : public sycl_cts::util::test_base {
   /** execute the test
    */
   void run(util::logger& log) override {
-#if !defined(SYCL_EXT_ONEAPI_PROPERTY_LIST)
-    WARN("SYCL_EXT_ONEAPI_PROPERTY_LIST is not defined, test is skipped");
+#if !defined(SYCL_EXT_ONEAPI_PROPERTIES)
+    WARN("SYCL_EXT_ONEAPI_PROPERTIES is not defined, test is skipped");
 #elif !defined(SYCL_EXT_ONEAPI_DEVICE_GLOBAL)
     WARN("SYCL_EXT_ONEAPI_DEVICE_GLOBAL is not defined, test is skipped");
 #else
